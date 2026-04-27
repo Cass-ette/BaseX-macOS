@@ -5,7 +5,7 @@ Unofficial macOS app packaging for [BaseX](https://basex.org/).
 This repository builds a self-contained `BaseX.app` and optional `.dmg` for macOS by:
 
 - downloading the official upstream BaseX ZIP release
-- bundling a minimal Java runtime
+- bundling a full JDK runtime for compatibility
 - generating a native `.app` bundle with Finder-friendly launch behavior
 
 ## Why this exists
@@ -40,6 +40,8 @@ Build the default upstream version:
 ./scripts/build.sh
 ```
 
+The default upstream version is stored in [`.basex-version`](.basex-version).
+
 Build a specific upstream version:
 
 ```bash
@@ -66,9 +68,17 @@ This repository does not modify BaseX itself. It only repackages the official up
 
 Recommended maintenance flow:
 
-1. update `BASEX_VERSION` in the workflow or pass it at dispatch time
-2. run the GitHub Actions build on `macos-latest`
-3. upload `BaseX.app` and `.dmg` to a GitHub Release
+1. update [`.basex-version`](.basex-version) when upstream BaseX changes
+2. run the `Release BaseX macOS App` workflow
+3. optionally override the upstream version or release tag at dispatch time
+4. let the workflow publish `BaseX.app`, `.dmg`, and SHA256 files as a GitHub Release
+
+## Release outputs
+
+- `BaseX.app`
+- `BaseX-<version>.dmg`
+- `BaseX.app.sha256`
+- `BaseX.dmg.sha256`
 
 ## License
 

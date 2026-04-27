@@ -5,8 +5,8 @@ on:
     inputs:
       basex_version:
         description: BaseX upstream version, for example 12.2
-        required: true
-        default: "12.2"
+        required: false
+        default: ""
   push:
     branches:
       - main
@@ -26,10 +26,17 @@ jobs:
           java-version: "17"
 
       - name: Build app bundle
+        shell: bash
         env:
-          BASEX_VERSION: ${{ inputs.basex_version || '12.2' }}
+          INPUT_BASEX_VERSION: ${{ inputs.basex_version }}
           CREATE_DMG: "1"
-        run: ./scripts/build.sh
+        run: |
+          set -euo pipefail
+          basex_version="$INPUT_BASEX_VERSION"
+          if [[ -z "$basex_version" ]]; then
+            basex_version="$(tr -d '[:space:]' < .basex-version)"
+          fi
+          BASEX_VERSION="$basex_version" ./scripts/build.sh
 
       - name: Upload app bundle
         uses: actions/upload-artifact@v4

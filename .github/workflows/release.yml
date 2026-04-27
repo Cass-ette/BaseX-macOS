@@ -1,0 +1,112 @@
+name: Release BaseX macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      basex_version:
+        description: BaseX upstream version, for example 12.2
+        required: false
+        default: ""
+      release_tag:
+        description: Optional Git tag to create, for example v12.2-1
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        env:
+          INPUT_BASEX_VERSION: ${{ inputs.basex_version }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          basex_version="$INPUT_BASEX_VERSION"
+          if [[ -z "$basex_version" ]]; then
+            basex_version="$(tr -d '[:space:]' < .basex-version)"
+          fi
+          if [[ -z "$basex_version" ]]; then
+            echo "failed to resolve BaseX version" >&2
+            exit 1
+          fi
+
+          release_tag="$INPUT_RELEASE_TAG"
+          if [[ -z "$release_tag" ]]; then
+            release_tag="v${basex_version}-1"
+          fi
+
+          release_name="BaseX macOS ${basex_version}"
+          echo "basex_version=$basex_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+
+      - name: Build app bundle
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+          CREATE_DMG: "1"
+        run: ./scripts/build.sh
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 BaseX.app > BaseX.app.sha256
+          shasum -a 256 BaseX-*.dmg > BaseX.dmg.sha256
+
+      - name: Render release notes
+        shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+        run: |
+          set -euo pipefail
+          sed "s/__BASEX_VERSION__/${BASEX_VERSION}/g" \
+            .github/release-template.md > RELEASE_NOTES.md
+
+      - name: Create tag
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = `refs/tags/${tag}`;
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref,
+                sha: context.sha,
+              });
+            }
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          name: ${{ steps.meta.outputs.release_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/BaseX.app
+            dist/*.dmg
+            dist/*.sha256

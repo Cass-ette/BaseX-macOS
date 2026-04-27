@@ -8,7 +8,9 @@ DIST_DIR="$ROOT_DIR/dist"
 DOWNLOAD_DIR="$BUILD_DIR/downloads"
 WORK_DIR="$BUILD_DIR/work"
 APP_NAME="BaseX"
-BASEX_VERSION="${BASEX_VERSION:-12.2}"
+DEFAULT_BASEX_VERSION_FILE="$ROOT_DIR/.basex-version"
+DEFAULT_BASEX_VERSION="$(tr -d '[:space:]' < "$DEFAULT_BASEX_VERSION_FILE" 2>/dev/null || true)"
+BASEX_VERSION="${BASEX_VERSION:-${DEFAULT_BASEX_VERSION:-12.2}}"
 BASEX_VERSION_TAG="${BASEX_VERSION//./}"
 BASEX_ZIP_URL="${BASEX_ZIP_URL:-https://files.basex.org/releases/${BASEX_VERSION}/BaseX${BASEX_VERSION_TAG}.zip}"
 CREATE_DMG="${CREATE_DMG:-0}"
@@ -122,11 +124,19 @@ create_dmg() {
     "$DMG_PATH" >/dev/null
 }
 
+validate_inputs() {
+  if [[ -z "$BASEX_VERSION" ]]; then
+    echo "BASEX_VERSION must not be empty" >&2
+    exit 1
+  fi
+}
+
 main() {
   require_cmd curl
   require_cmd unzip
   require_cmd java
   require_cmd hdiutil
+  validate_inputs
 
   prepare_dirs
   download_upstream
