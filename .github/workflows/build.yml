@@ -1,0 +1,40 @@
+name: Build BaseX macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      basex_version:
+        description: BaseX upstream version, for example 12.2
+        required: true
+        default: "12.2"
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build app bundle
+        env:
+          BASEX_VERSION: ${{ inputs.basex_version || '12.2' }}
+          CREATE_DMG: "1"
+        run: ./scripts/build.sh
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: basex-macos-app
+          path: |
+            dist/BaseX.app
+            dist/*.dmg
