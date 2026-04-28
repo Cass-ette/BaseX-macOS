@@ -14,6 +14,10 @@ BASEX_VERSION="${BASEX_VERSION:-${DEFAULT_BASEX_VERSION:-12.2}}"
 BASEX_VERSION_TAG="${BASEX_VERSION//./}"
 BASEX_ZIP_URL="${BASEX_ZIP_URL:-https://files.basex.org/releases/${BASEX_VERSION}/BaseX${BASEX_VERSION_TAG}.zip}"
 CREATE_DMG="${CREATE_DMG:-0}"
+SIGN_APP="${SIGN_APP:-0}"
+SIGN_DMG="${SIGN_DMG:-0}"
+APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
+APP_ICON_PATH="${APP_ICON_PATH:-$ROOT_DIR/resources/BaseX.icns}"
 ZIP_PATH="$DOWNLOAD_DIR/BaseX${BASEX_VERSION_TAG}.zip"
 UPSTREAM_DIR="$WORK_DIR/upstream"
 STAGE_DIR="$WORK_DIR/stage"
@@ -81,6 +85,14 @@ create_runtime() {
   cp -R "$java_home" "$WORK_DIR/runtime"
 }
 
+copy_icon() {
+  if [[ -f "$APP_ICON_PATH" ]]; then
+    cp "$APP_ICON_PATH" "$APP_DIR/Contents/Resources/BaseX.icns"
+  else
+    echo "warning: icon file not found, using default macOS app icon: $APP_ICON_PATH" >&2
+  fi
+}
+
 write_launcher() {
   local launcher_path="$APP_DIR/Contents/MacOS/BaseX"
   cat >"$launcher_path" <<'EOF'
@@ -113,6 +125,7 @@ assemble_app() {
   cp -R "$WORK_DIR/runtime" "$APP_DIR/Contents/runtime"
   write_info_plist
   write_launcher
+  copy_icon
 }
 
 create_dmg() {
@@ -124,10 +137,40 @@ create_dmg() {
     "$DMG_PATH" >/dev/null
 }
 
+sign_app_bundle() {
+  codesign \
+    --force \
+    --deep \
+    --sign "$APPLE_SIGNING_IDENTITY" \
+    --timestamp \
+    --options runtime \
+    "$APP_DIR"
+
+  codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+}
+
+sign_dmg_file() {
+  codesign \
+    --force \
+    --sign "$APPLE_SIGNING_IDENTITY" \
+    --timestamp \
+    "$DMG_PATH"
+
+  codesign --verify --verbose=2 "$DMG_PATH"
+}
+
 validate_inputs() {
   if [[ -z "$BASEX_VERSION" ]]; then
     echo "BASEX_VERSION must not be empty" >&2
     exit 1
+  fi
+
+  if [[ "$SIGN_APP" == "1" || "$SIGN_DMG" == "1" ]]; then
+    require_cmd codesign
+    if [[ -z "$APPLE_SIGNING_IDENTITY" ]]; then
+      echo "APPLE_SIGNING_IDENTITY must be set when signing is enabled" >&2
+      exit 1
+    fi
   fi
 }
 
@@ -149,8 +192,14 @@ main() {
   stage_upstream "$extracted_root"
   create_runtime "$java_home"
   assemble_app
+  if [[ "$SIGN_APP" == "1" ]]; then
+    sign_app_bundle
+  fi
   if [[ "$CREATE_DMG" == "1" ]]; then
     create_dmg
+    if [[ "$SIGN_DMG" == "1" ]]; then
+      sign_dmg_file
+    fi
   else
     echo "Skipping dmg creation. Set CREATE_DMG=1 to build a dmg."
   fi

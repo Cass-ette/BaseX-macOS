@@ -1,5 +1,8 @@
 name: Release BaseX macOS App
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   workflow_dispatch:
     inputs:
@@ -27,6 +30,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/app-signing.p12"
+          KEYCHAIN_PASSWORD="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Resolve release metadata
         id: meta
@@ -58,8 +84,31 @@ jobs:
       - name: Build app bundle
         env:
           BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
-          CREATE_DMG: "1"
+          CREATE_DMG: "0"
+          SIGN_APP: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && '1' || '0' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: ./scripts/build.sh
+
+      - name: Notarize app bundle
+        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials "AC_NOTARY" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH"
+          xcrun notarytool submit dist/BaseX.app \
+            --keychain-profile "AC_NOTARY" \
+            --keychain "$KEYCHAIN_PATH" \
+            --wait
+          xcrun stapler staple dist/BaseX.app
 
       - name: Package app bundle
         shell: bash
@@ -69,6 +118,50 @@ jobs:
           set -euo pipefail
           cd dist
           ditto -c -k --keepParent BaseX.app "BaseX-${BASEX_VERSION}.app.zip"
+
+      - name: Create dmg artifact
+        shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          rm -f "BaseX-${BASEX_VERSION}.dmg"
+          hdiutil create \
+            -volname BaseX \
+            -srcfolder BaseX.app \
+            -ov \
+            -format UDZO \
+            "BaseX-${BASEX_VERSION}.dmg" >/dev/null
+
+      - name: Sign dmg artifact
+        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+        shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          codesign \
+            --force \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            --timestamp \
+            "dist/BaseX-${BASEX_VERSION}.dmg"
+          codesign --verify --verbose=2 "dist/BaseX-${BASEX_VERSION}.dmg"
+
+      - name: Notarize dmg artifact
+        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "dist/BaseX-${BASEX_VERSION}.dmg" \
+            --keychain-profile "AC_NOTARY" \
+            --keychain "$KEYCHAIN_PATH" \
+            --wait
+          xcrun stapler staple "dist/BaseX-${BASEX_VERSION}.dmg"
 
       - name: Generate checksums
         shell: bash
@@ -84,9 +177,23 @@ jobs:
         shell: bash
         env:
           BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          sed "s/__BASEX_VERSION__/${BASEX_VERSION}/g" \
+          security_status="Unsigned and unnotarized"
+          if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            security_status="Signed only"
+          fi
+          if [[ -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            security_status="Signed, notarized, and stapled"
+          fi
+
+          sed \
+            -e "s/__BASEX_VERSION__/${BASEX_VERSION}/g" \
+            -e "s/__SECURITY_STATUS__/${security_status}/g" \
             .github/release-template.md > RELEASE_NOTES.md
 
       - name: Create tag

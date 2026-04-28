@@ -8,6 +8,8 @@
   <string>BaseX</string>
   <key>CFBundleExecutable</key>
   <string>BaseX</string>
+  <key>CFBundleIconFile</key>
+  <string>BaseX</string>
   <key>CFBundleIdentifier</key>
   <string>io.github.cass-ette.basex</string>
   <key>CFBundleInfoDictionaryVersion</key>

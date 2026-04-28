@@ -20,8 +20,7 @@ BaseX ships a GUI on macOS, but the official distribution does not currently pro
 
 ## Current limitations
 
-- the app currently uses the default macOS application icon
-- artifacts are not code signed or notarized
+- notarization depends on Apple Developer credentials being configured as GitHub secrets
 - the package is unofficial and should be labeled accordingly in releases
 
 ## Requirements
@@ -31,6 +30,8 @@ BaseX ships a GUI on macOS, but the official distribution does not currently pro
 - `curl`
 - `unzip`
 - `hdiutil`
+
+The repository already includes a committed `BaseX.icns`, so normal builds do not need icon tooling.
 
 ## Build locally
 
@@ -62,6 +63,12 @@ Additional output:
 
 - `dist/BaseX-<version>.dmg`
 
+Build a signed app locally if you have a valid signing identity in Keychain:
+
+```bash
+SIGN_APP=1 APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./scripts/build.sh
+```
+
 ## Release strategy
 
 This repository does not modify BaseX itself. It only repackages the official upstream release for macOS convenience.
@@ -72,6 +79,20 @@ Recommended maintenance flow:
 2. run the `Release BaseX macOS App` workflow
 3. optionally override the upstream version or release tag at dispatch time
 4. let the workflow publish `BaseX.app`, `.dmg`, and SHA256 files as a GitHub Release
+
+## Optional signing and notarization
+
+The release workflow can sign and notarize artifacts when these repository secrets are configured:
+
+- `APPLE_CERTIFICATE_P12_BASE64`: Base64-encoded Developer ID Application certificate in `.p12` form
+- `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12` file
+- `APPLE_SIGNING_IDENTITY`: Exact `codesign` identity name
+- `APPLE_ID`: Apple account email used for notarization
+- `APPLE_APP_SPECIFIC_PASSWORD`: App-specific password for notarization
+- `APPLE_TEAM_ID`: Apple Developer team ID
+
+If only the signing secrets are present, the workflow will produce signed artifacts.
+If both signing and notarization secrets are present, the workflow will notarize and staple the app and DMG.
 
 ## Release outputs
 
