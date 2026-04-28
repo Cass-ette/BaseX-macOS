@@ -31,8 +31,34 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Resolve security mode
+        id: security
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          has_signing=0
+          has_notary=0
+
+          if [[ -n "$APPLE_CERTIFICATE_P12_BASE64" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            has_signing=1
+          fi
+
+          if [[ "$has_signing" == "1" && -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            has_notary=1
+          fi
+
+          echo "has_signing=$has_signing" >> "$GITHUB_OUTPUT"
+          echo "has_notary=$has_notary" >> "$GITHUB_OUTPUT"
+
       - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+        if: ${{ steps.security.outputs.has_signing == '1' }}
         shell: bash
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -85,12 +111,12 @@ jobs:
         env:
           BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
           CREATE_DMG: "0"
-          SIGN_APP: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && '1' || '0' }}
+          SIGN_APP: ${{ steps.security.outputs.has_signing }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: ./scripts/build.sh
 
       - name: Notarize app bundle
-        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ steps.security.outputs.has_notary == '1' }}
         shell: bash
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -135,7 +161,7 @@ jobs:
             "BaseX-${BASEX_VERSION}.dmg" >/dev/null
 
       - name: Sign dmg artifact
-        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+        if: ${{ steps.security.outputs.has_signing == '1' }}
         shell: bash
         env:
           BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
@@ -150,7 +176,7 @@ jobs:
           codesign --verify --verbose=2 "dist/BaseX-${BASEX_VERSION}.dmg"
 
       - name: Notarize dmg artifact
-        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ steps.security.outputs.has_notary == '1' }}
         shell: bash
         env:
           BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
@@ -181,13 +207,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          HAS_SIGNING: ${{ steps.security.outputs.has_signing }}
+          HAS_NOTARY: ${{ steps.security.outputs.has_notary }}
         run: |
           set -euo pipefail
           security_status="Unsigned and unnotarized"
-          if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
+          if [[ "$HAS_SIGNING" == "1" ]]; then
             security_status="Signed only"
           fi
-          if [[ -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+          if [[ "$HAS_NOTARY" == "1" ]]; then
             security_status="Signed, notarized, and stapled"
           fi
 
