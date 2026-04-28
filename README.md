@@ -75,10 +75,10 @@ Recommended maintenance flow:
 
 ## Release outputs
 
-- `BaseX.app`
+- `BaseX-<version>.app.zip`
 - `BaseX-<version>.dmg`
-- `BaseX.app.sha256`
-- `BaseX.dmg.sha256`
+- `BaseX-<version>.app.zip.sha256`
+- `BaseX-<version>.dmg.sha256`
 
 ## License
 

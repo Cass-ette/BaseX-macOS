@@ -61,13 +61,24 @@ jobs:
           CREATE_DMG: "1"
         run: ./scripts/build.sh
 
-      - name: Generate checksums
+      - name: Package app bundle
         shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
         run: |
           set -euo pipefail
           cd dist
-          shasum -a 256 BaseX.app > BaseX.app.sha256
-          shasum -a 256 BaseX-*.dmg > BaseX.dmg.sha256
+          ditto -c -k --keepParent BaseX.app "BaseX-${BASEX_VERSION}.app.zip"
+
+      - name: Generate checksums
+        shell: bash
+        env:
+          BASEX_VERSION: ${{ steps.meta.outputs.basex_version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 "BaseX-${BASEX_VERSION}.app.zip" > "BaseX-${BASEX_VERSION}.app.zip.sha256"
+          shasum -a 256 BaseX-*.dmg > "BaseX-${BASEX_VERSION}.dmg.sha256"
 
       - name: Render release notes
         shell: bash
@@ -107,6 +118,6 @@ jobs:
           name: ${{ steps.meta.outputs.release_name }}
           body_path: RELEASE_NOTES.md
           files: |
-            dist/BaseX.app
+            dist/*.app.zip
             dist/*.dmg
             dist/*.sha256
